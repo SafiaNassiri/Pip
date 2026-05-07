@@ -32,6 +32,7 @@ BASE       = os.path.dirname(os.path.abspath(__file__))
 SPRITE_DIR = os.path.join(BASE, "sprites")
 SETTINGS_F = os.path.join(BASE, "settings.json")
 STATE_F    = os.path.join(BASE, "state.json")      # mood, achievements, etc.
+LOG_F      = os.path.join(BASE, "pip_log.json")    # diary entries
 
 SPRITE_SIZE  = 223
 BUBBLE_MS    = 4000
@@ -42,7 +43,7 @@ DEFAULT_SETTINGS = {
     "name":         "Pip",
     "git_dirs":     [],          # list of repo paths to watch
     "city":         "",          # for weather
-    "git_warn_hours": 24,
+    "git_warn_minutes": 30,
 }
 
 DEFAULT_STATE = {
@@ -144,6 +145,15 @@ PERSONALITIES = {
         "git_warn":   ["hey. commit your code.","push something","git commit...","your repo's dusty 👀","when did you last commit?"],
         "screen_time":["you've been here a while","take a break?","go touch grass","eyes tired?","screen time check 👀"],
         "feed_full":  ["i'm full!","can't eat more","already stuffed","save it for later","no more!"],
+        "weather_idle": {
+            "clear":        ["it's nice out today ☀️","sunny outside rn","perfect weather tbh"],
+            "clouds":       ["kinda cloudy out there","overcast vibes today","grey skies..."],
+            "rain":         ["it's raining outside 🌧️","rainy day energy","cozy rain day"],
+            "snow":         ["it's snowing!! ❄️","snow outside!!","everything's white out there"],
+            "thunderstorm": ["storm outside ⛈️","thunder outside rn","wild weather today"],
+            "mist":         ["foggy out there 🌫️","can't see far today","mysterious outside"],
+        },
+        "talk_response": ["hmm","interesting","oh?","tell me more","i see i see","noted ✓","...really?","wow","no way","💭"],
     },
     "hype": {
         "morning":    ["LET'S GO ☀️","RISE AND GRIND","TODAY WE WIN","GOOD MORNING!!"],
@@ -232,6 +242,26 @@ def save_state(s):
             json.dump(s, f, indent=2)
     except Exception as e:
         print(f"[pip] ERROR saving state: {e}")
+
+# ── log / diary ───────────────────────────────────────────────────────────────
+def load_log():
+    try:
+        with open(LOG_F) as f: return json.load(f)
+    except Exception: return []
+
+def append_log(entry):
+    """Append an entry dict with timestamp to the log."""
+    try:
+        log = load_log()
+        log.append({
+            "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+            **entry
+        })
+        # keep last 200 entries
+        log = log[-200:]
+        with open(LOG_F, "w") as f: json.dump(log, f, indent=2)
+    except Exception as e:
+        print(f"[pip] log error: {e}")
 
 # ── system helpers ─────────────────────────────────────────────────────────────
 def get_taskbar_height():
@@ -434,6 +464,7 @@ class Companion:
 
         # weather cache
         self._weather_checked = False
+        self._current_weather = self.state.get("weather_cache", None)
 
         # new achievement queue
         self._achievement_queue = []
@@ -493,13 +524,21 @@ class Companion:
                    "relief":"flat","bd":0,"cursor":"hand2","padx":2,
                    "activebackground":"#1a1a2e","activeforeground":"#a0d8ef"}
 
-        tk.Button(self.bar, text="🤍", command=self._pet,          **BAR_BTN).pack(side="left",  expand=True)
-        tk.Button(self.bar, text="🍪", command=self._feed,         **BAR_BTN).pack(side="left",  expand=True)
-        tk.Button(self.bar, text="🎵", command=self._show_now_playing, **BAR_BTN).pack(side="left", expand=True)
-        tk.Button(self.bar, text="🎮", command=self._show_current_game, **BAR_BTN).pack(side="left", expand=True)
-        tk.Button(self.bar, text="🏆", command=self._show_achievements, **BAR_BTN).pack(side="left", expand=True)
-        tk.Button(self.bar, text="⚙",  command=self._open_settings, **BAR_BTN).pack(side="left", expand=True)
-        tk.Button(self.bar, text="✕",  command=self.root.destroy,
+        def make_btn(icon, left_cmd, right_cmd=None):
+            b = tk.Button(self.bar, text=icon, command=left_cmd, **BAR_BTN)
+            b.pack(side="left", expand=True)
+            if right_cmd:
+                b.bind("<Button-3>", lambda e: right_cmd())
+            return b
+
+        make_btn("🤍", self._pet,                self._show_mood)
+        make_btn("🍪", self._feed,               self._show_food_level)
+        make_btn("🎵", self._show_now_playing,   self._show_log)
+        make_btn("🎮", self._show_current_game,  self._show_screen_time)
+        make_btn("🏆", self._show_achievements,  None)
+        make_btn("💬", self._open_talk,          None)
+        make_btn("⚙",  self._open_settings,     None)
+        tk.Button(self.bar, text="✕", command=self.root.destroy,
                   bg="#0d0d1a", fg="#5a2a2a", font=("Courier New",11),
                   relief="flat", bd=0, cursor="hand2", padx=2,
                   activebackground="#1a1a2e", activeforeground="#ff6b6b").pack(side="left", expand=True)
@@ -704,6 +743,151 @@ class Companion:
                   relief="flat", padx=10, pady=3,
                   cursor="hand2").pack(pady=8)
 
+    def _show_mood(self):
+        mood = self.state.get("mood", 0)
+        if mood > 5:   label, expr = "feeling great ♡", "happy"
+        elif mood > 0: label, expr = "doing okay", "idle"
+        elif mood == 0:label, expr = "neutral i guess", "idle"
+        elif mood > -5:label, expr = "a little grumpy", "annoyed"
+        else:          label, expr = "not happy rn", "annoyed"
+        self.show_bubble(f"mood: {label} ({mood:+d}/10)", expr, duration=3000)
+
+    def _show_food_level(self):
+        food = self.state.get("food_level", 5)
+        bar  = "█" * food + "░" * (10 - food)
+        self.show_bubble(f"hunger: {bar} {food}/10", "idle", duration=3000)
+
+    def _show_log(self):
+        """Open pip diary window."""
+        log = load_log()
+        win = tk.Toplevel(self.root)
+        win.title("pip's diary")
+        win.configure(bg="#0d0d1a")
+        win.resizable(True, True)
+        win.attributes("-topmost", True)
+        px, py = int(self.phys_x), int(self.phys_y)
+        win.geometry(f"300x400+{max(0,px-80)}+{max(0,py-440)}")
+
+        tk.Label(win, text="📓  pip's diary",
+                 bg="#0d0d1a", fg="#a0d8ef",
+                 font=("Courier New",10,"bold")).pack(pady=(10,4))
+
+        frame = tk.Frame(win, bg="#0d0d1a")
+        frame.pack(fill="both", expand=True, padx=8, pady=4)
+
+        sb = tk.Scrollbar(frame)
+        sb.pack(side="right", fill="y")
+
+        lb = tk.Text(frame, bg="#0d0d1a", fg="#a0d8ef",
+                     font=("Courier New",8), relief="flat",
+                     wrap="word", state="disabled",
+                     yscrollcommand=sb.set)
+        lb.pack(fill="both", expand=True)
+        sb.config(command=lb.yview)
+
+        lb.config(state="normal")
+        if not log:
+            lb.insert("end", "nothing yet...\npip is still observing.")
+        else:
+            for entry in reversed(log[-50:]):
+                t    = entry.get("time","")
+                text = entry.get("text","")
+                lb.insert("end", f"[{t}]\n{text}\n\n")
+        lb.config(state="disabled")
+
+        tk.Button(win, text="clear log", command=lambda: self._clear_log(win),
+                  bg="#1a1a2e", fg="#ff6b6b",
+                  font=("Courier New",8), relief="flat",
+                  cursor="hand2", padx=8, pady=3).pack(pady=6)
+
+    def _clear_log(self, win):
+        try:
+            with open(LOG_F, "w") as f: json.dump([], f)
+            win.destroy()
+            self.show_bubble("diary cleared", duration=1500)
+        except Exception as e:
+            print(f"[pip] clear log error: {e}")
+
+    def _open_talk(self):
+        """Small input window to talk to Pip."""
+        win = tk.Toplevel(self.root)
+        win.title("talk to pip")
+        win.configure(bg="#0d0d1a")
+        win.resizable(False, False)
+        win.attributes("-topmost", True)
+        px, py = int(self.phys_x), int(self.phys_y)
+        win.geometry(f"260x100+{px}+{max(0,py-120)}")
+
+        tk.Label(win, text="say something to pip",
+                 bg="#0d0d1a", fg="#5a5a8a",
+                 font=("Courier New",8)).pack(pady=(8,4))
+
+        entry_var = tk.StringVar()
+        entry = tk.Entry(win, textvariable=entry_var,
+                         bg="#1a1a2e", fg="#ffffff",
+                         font=("Courier New",10), relief="flat",
+                         bd=6, insertbackground="white", width=24)
+        entry.pack(padx=16, pady=2)
+        entry.focus()
+
+        def send(event=None):
+            text = entry_var.get().strip()
+            if not text: return
+            win.destroy()
+            self._handle_talk(text)
+
+        entry.bind("<Return>", send)
+        tk.Button(win, text="send", command=send,
+                  bg="#1a1a2e", fg="#a0d8ef",
+                  font=("Courier New",9,"bold"),
+                  relief="flat", padx=10, pady=3,
+                  cursor="hand2").pack(pady=6)
+
+    def _handle_talk(self, text):
+        """Pip responds to something you said."""
+        text_l = text.lower()
+        # log it
+        append_log({"text": f"you: {text}"})
+
+        # keyword responses
+        if any(w in text_l for w in ("hello","hi","hey","hiya")):
+            resp = f"hi!! ♡"
+        elif any(w in text_l for w in ("how are you","you ok","you good")):
+            mood = self.state.get("mood",0)
+            resp = "doing great actually ♡" if mood > 0 else "could be better tbh" if mood < 0 else "i'm okay!"
+        elif any(w in text_l for w in ("good morning","morning")):
+            resp = "good morning!! ☀️"
+        elif any(w in text_l for w in ("good night","night","bye","goodbye")):
+            resp = "goodnight ♡ see you"
+        elif any(w in text_l for w in ("thank","thanks","ty")):
+            resp = "of course ♡"
+        elif any(w in text_l for w in ("i love you","love you","ily")):
+            resp = "♡♡♡"
+            self._shift_mood(2)
+        elif any(w in text_l for w in ("i'm tired","im tired","so tired","exhausted")):
+            resp = "get some rest 💙"
+        elif any(w in text_l for w in ("i'm hungry","im hungry","food")):
+            resp = "me too 🍪"
+        elif any(w in text_l for w in ("i'm sad","im sad","sad","unhappy","depressed")):
+            resp = "i'm here ♡"
+            self._shift_mood(1)
+        elif any(w in text_l for w in ("i'm happy","im happy","happy","great","amazing")):
+            resp = "that's wonderful!! ♡"
+            self._shift_mood(1)
+        elif any(w in text_l for w in ("stop","leave me alone","go away","shut up")):
+            resp = "ok ok... 😶"
+            self._shift_mood(-1)
+        elif "?" in text:
+            resp = random.choice(["hm... i'm not sure","good question","🤔","maybe?","possibly!"])
+        else:
+            p = self.settings.get("personality","chill")
+            bank = PERSONALITIES.get(p, PERSONALITIES["chill"])
+            resp = random.choice(bank.get("talk_response", ["..."]))
+
+        append_log({"text": f"pip: {resp}"})
+        self.show_bubble(resp, "talking", duration=3000)
+        self._shift_mood(1)  # talking makes pip happier
+
     def _open_settings(self):
         win = tk.Toplevel(self.root)
         win.title("pip settings")
@@ -729,13 +913,13 @@ class Companion:
         idle_var  = tk.StringVar(value=str(self.settings.get("idle_minutes",10)))
         city_var  = tk.StringVar(value=self.settings.get("city",""))
         git_var   = tk.StringVar(value=";".join(self.settings.get("git_dirs",[])))
-        warn_var  = tk.StringVar(value=str(self.settings.get("git_warn_hours",24)))
+        warn_var  = tk.StringVar(value=str(self.settings.get("git_warn_minutes",30)))
 
         field("name", name_var)
         field("idle timeout (minutes)", idle_var)
         field("city (for weather)", city_var)
         field("git repos (sep. by ;)", git_var)
-        field("git warn after (hours)", warn_var)
+        field("git warn after (minutes)", warn_var)
 
         tk.Label(win, text="personality", **LBL).pack(anchor="w", padx=16)
         pers_var = tk.StringVar(value=self.settings.get("personality","chill"))
@@ -757,7 +941,7 @@ class Companion:
             self.settings["name"]           = name_var.get().strip() or "Pip"
             self.settings["personality"]    = pers_var.get()
             self.settings["city"]           = city_var.get().strip()
-            self.settings["git_warn_hours"] = int(warn_var.get()) if warn_var.get().isdigit() else 24
+            self.settings["git_warn_minutes"] = int(warn_var.get()) if warn_var.get().isdigit() else 30
             try: self.settings["idle_minutes"] = max(1, int(idle_var.get()))
             except ValueError: pass
             raw_dirs = [d.strip() for d in git_var.get().split(";") if d.strip()]
@@ -783,7 +967,9 @@ class Companion:
     # ── interactions ───────────────────────────────────────────────────────────
     def on_press(self, event):
         self._hide_glow()
-        self.is_dragging  = True
+        # don't start dragging yet — wait to see if mouse moves
+        self.is_dragging  = False
+        self._drag_started = False
         self.drag_said    = False
         self._press_x     = event.x_root
         self._press_y     = event.y_root
@@ -793,22 +979,43 @@ class Companion:
         self.vel_x = self.vel_y = 0.0
         self.last_active  = time.time()
         self.was_idle     = False
-        self._squish()
 
     def on_drag(self, event):
+        dx = abs(event.x_root - self._press_x)
+        dy = abs(event.y_root - self._press_y)
+        # only start drag after moving 8px — avoids accidental drag on tap
+        if not self._drag_started:
+            if dx > 8 or dy > 8:
+                self._drag_started = True
+                self.is_dragging   = True
+                self.set_expr("surprised")
+            else:
+                return   # still looks like a tap, ignore
+
         self._check_shake(event)
         self.target_x = event.x_root - SPRITE_SIZE // 2
         self.target_y = event.y_root - SPRITE_SIZE // 2
-        if not self.drag_said and (
-            abs(event.x_root - self._press_x) > 12 or
-            abs(event.y_root - self._press_y) > 12
-        ):
+        if not self.drag_said:
             self.drag_said = True
-            self.set_expr("surprised")
             self.show_bubble(self.msg("drag"), duration=2000)
 
     def on_release(self, event):
-        self.is_dragging = False
+        dx = abs(event.x_root - self._press_x)
+        dy = abs(event.y_root - self._press_y)
+
+        if not self._drag_started:
+            # clean tap — do the squish
+            self._squish()
+            if not self.bubble_active:
+                self.show_bubble(self.msg(
+                    "morning" if 6 <= datetime.datetime.now().hour < 12 else
+                    "afternoon" if datetime.datetime.now().hour < 17 else
+                    "evening" if datetime.datetime.now().hour < 21 else "night"
+                ), "talking", duration=2500)
+
+        self.is_dragging   = False
+        self._drag_started = False
+
         speed = abs(self.vel_x) + abs(self.vel_y)
         if speed > 5:
             self.state["throws"] = self.state.get("throws", 0) + 1
@@ -816,7 +1023,7 @@ class Companion:
             self._check_achievements()
             if not self.bubble_active:
                 self.show_bubble(self.msg("throw"), "surprised", duration=1500)
-        elif not self.bubble_active:
+        elif self._drag_started is False and not self.bubble_active:
             self.set_expr(self._base_expr())
 
     def on_double_click(self, event):
@@ -972,9 +1179,10 @@ class Companion:
         self.root.after(2000, self.idle_behavior_tick)
 
     def _do_idle_behavior(self):
+        has_weather = bool(self._current_weather)
         action = random.choices(
-            ["yawn","stretch","lookaround","nothing"],
-            weights=[2, 2, 3, 5]
+            ["yawn","stretch","weather_comment","lookaround","nothing"],
+            weights=[2, 2, 3 if has_weather else 0, 3, 5]
         )[0]
         if action == "yawn":
             self.set_expr("sleepy")
@@ -982,6 +1190,13 @@ class Companion:
             self.root.after(2600, lambda: self.set_expr(self._base_expr()))
         elif action == "stretch":
             self.show_bubble(self.msg("stretch"), duration=2000)
+        elif action == "weather_comment":
+            if self._current_weather:
+                p    = self.settings.get("personality","chill")
+                bank = PERSONALITIES.get(p, PERSONALITIES["chill"])
+                msgs = bank.get("weather_idle", {}).get(self._current_weather)
+                if msgs:
+                    self.show_bubble(random.choice(msgs), "idle", duration=3000)
         elif action == "lookaround":
             self.label.place(x=8,  y=60, width=SPRITE_SIZE, height=SPRITE_SIZE)
             self.root.after(500, lambda: self.label.place(
@@ -1017,6 +1232,23 @@ class Companion:
             if self.was_idle:
                 self.was_idle = False
                 self.show_bubble(self.msg("return"), "surprised")
+
+        # log notable events
+        self._log_tick = getattr(self, "_log_tick", 0) + 1
+        if self._log_tick >= 4:   # every ~60s
+            self._log_tick = 0
+            h2 = datetime.datetime.now().hour
+            if 6 <= h2 < 12:   tod = "morning"
+            elif h2 < 17:      tod = "afternoon"
+            elif h2 < 21:      tod = "evening"
+            else:              tod = "night"
+            entry_parts = [f"{tod} vibes"]
+            if self._current_weather:
+                entry_parts.append(f"weather: {self._current_weather}")
+            mood = self.state.get("mood",0)
+            if mood > 3:   entry_parts.append("mood: happy")
+            elif mood < -3:entry_parts.append("mood: grumpy")
+            append_log({"text": " · ".join(entry_parts)})
 
         # spotify dance
         track = get_spotify_track()
@@ -1105,7 +1337,8 @@ class Companion:
 
     def _check_git_bg(self):
         dirs      = self.settings.get("git_dirs", [])
-        warn_h    = self.settings.get("git_warn_hours", 24)
+        warn_mins = self.settings.get("git_warn_minutes", 30)
+        warn_h    = warn_mins / 60
         stale     = check_git_repos(dirs, warn_h)
         if stale:
             name, age = stale[0]
@@ -1118,9 +1351,13 @@ class Companion:
         city    = self.settings.get("city","")
         weather = get_weather(city)
         if weather:
+            self._current_weather = weather
+            self.state["weather_cache"] = weather
+            save_state(self.state)
             msgs = WEATHER_MSGS.get(weather, WEATHER_MSGS["clear"])
             msg  = random.choice(msgs)
             print(f"[pip] weather in {city}: {weather}")
+            append_log({"text": f"weather check: {weather} in {city}"})
             self.root.after(2000, lambda: self.show_bubble(msg, "idle", duration=4000))
 
 

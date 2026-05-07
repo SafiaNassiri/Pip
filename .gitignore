@@ -9,6 +9,7 @@ venv/
 # pip local data — don't share these
 settings.json
 state.json
+pip_log.json
 
 # os
 .DS_Store
