@@ -1,5 +1,4 @@
 pillow
-sounddevice
-numpy
 psutil
 pywin32
+requests

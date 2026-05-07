@@ -1,0 +1,17 @@
+{
+  "mood": 3,
+  "pets": 1,
+  "shakes": 0,
+  "throws": 5,
+  "feeds": 1,
+  "session_start": "2026-05-07T17:54:54.632448",
+  "achievements": [
+    "first_feed",
+    "first_pet",
+    "first_throw"
+  ],
+  "last_git_check": 1778190924.9189165,
+  "last_weather": null,
+  "weather_cache": null,
+  "food_level": 7
+}

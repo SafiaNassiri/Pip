@@ -1,9 +1,18 @@
+# python
 __pycache__/
 *.py[cod]
 *.pyo
 .env
 .venv
 venv/
-*.log
+
+# pip local data — don't share these
+settings.json
+state.json
+
+# os
 .DS_Store
 Thumbs.db
+
+# logs
+*.log
