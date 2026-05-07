@@ -1,4 +1,4 @@
-# Pip 🤖
+# Pip
 
 Pip is a tiny pixel art desktop companion that lives on your screen and actually pays attention.
 
