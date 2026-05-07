@@ -1,7 +1,7 @@
 """
 companion.py — ambient-aware desktop robot
 requires: pip install pillow sounddevice numpy psutil pywin32
-place in same folder as: idle.png happy.png surprised.png annoyed.png talking.png sleepy.png
+sprites go in ./sprites/ folder
 right-click to close
 """
 
@@ -28,16 +28,26 @@ try:
 except Exception:
     WIN_AVAILABLE = False
 
-# ── config ────────────────────────────────────────────────────────────────────
-SPRITE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sprites")
+# ── config ─────────────────────────────────────────────────────────────────────
+SPRITE_DIR   = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sprites")
 SPRITE_SIZE  = 223
 BUBBLE_MS    = 4000
-AUDIO_THRESH = 0.02        # RMS threshold for "music playing"
+AUDIO_THRESH = 0.015
 IDLE_MINUTES = 10
+
+# game process detection — reads local process list only, no network calls
+GAME_PROCESS_HINTS = [
+    "gameoverlayui.exe",       # Steam overlay = game is running
+    "steamwebhelper.exe",      # Steam is open
+    "easyanticheat.exe",
+    "epicgameslauncher.exe",
+    "unrealcefsubprocess.exe",
+    "galaxyclient.exe",        # GOG
+]
 
 GAME_KEYWORDS    = ["game","steam","epic","roblox","minecraft","godot","unity",
                     "itch","rpg","overwatch","valorant","league","fortnite",
-                    "genshin","hollow","celeste","stardew"]
+                    "genshin","hollow","celeste","stardew","cookie"]
 CODE_KEYWORDS    = ["code","vscode","visual studio","cursor","pycharm",
                     "jetbrains","sublime","notepad++","vim","neovim"]
 BROWSER_KEYWORDS = ["chrome","firefox","edge","opera","brave","safari"]
@@ -58,10 +68,13 @@ MESSAGES = {
 }
 
 GAME_MSGS    = ["ooh are we gaming??","let's GOOOO","no thoughts, only game",
-                "i believe in you","don't die 🎮"]
+                "i believe in you","don't die 🎮","steam detected 👀",
+                "let him cook 🎮"]
 CODE_MSGS    = ["still coding huh","you got this","one more bug right?",
                 "i see you grinding","ship it 🚀"]
-MUSIC_MSGS   = ["🎵 bop","this slaps","i feel it","🎶✨","vibing rn"]
+MUSIC_MSGS   = ["🎵 bop","this slaps","i feel it","🎶✨","vibing rn",
+                "ok this goes hard"]
+DRAG_MSGS    = ["wheeee","put me down!!","wooooah","hey!!","weeee :D"]
 IDLE_MSGS    = ["...hello?","you still there?","i'm bored",
                 "knock knock","*taps screen*"]
 RETURN_MSGS  = ["oh you're back!","there you are!","welcome back :)",
@@ -98,12 +111,37 @@ def classify_window(name):
     if any(k in name for k in BROWSER_KEYWORDS): return "browser"
     return "other"
 
+def is_game_running():
+    """Check running processes for signs of Steam/Epic game activity.
+    Reads local process list only — no network calls, no external data."""
+    try:
+        procs = {p.name().lower() for p in psutil.process_iter(["name"])}
+        return any(hint in procs for hint in GAME_PROCESS_HINTS)
+    except Exception:
+        return False
 
-# ── app ───────────────────────────────────────────────────────────────────────
+def get_wasapi_loopback_device():
+    """Find a WASAPI loopback or Stereo Mix device for system audio capture."""
+    if not AUDIO_AVAILABLE:
+        return None
+    try:
+        devices = sd.query_devices()
+        for i, d in enumerate(devices):
+            name = d["name"].lower()
+            if d["max_input_channels"] > 0 and any(
+                k in name for k in ("loopback","stereo mix","wave out mix","what u hear")
+            ):
+                return i
+    except Exception:
+        pass
+    return None
+
+
+# ── app ────────────────────────────────────────────────────────────────────────
 class Companion:
     def __init__(self, root):
         self.root = root
-        self.root.title("companion")
+        self.root.title("pip")
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
         self.root.attributes("-transparentcolor", "#010101")
@@ -112,21 +150,35 @@ class Companion:
 
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
+
+        # ── physics state ──────────────────────────────────────────────────────
+        self.phys_x    = float(sw - SPRITE_SIZE - 20)
+        self.phys_y    = float(sh - SPRITE_SIZE - 80)
+        self.vel_x     = 0.0
+        self.vel_y     = 0.0
+        self.target_x  = self.phys_x
+        self.target_y  = self.phys_y
+        self.is_dragging   = False
+        self.drag_said_msg = False
+        self._press_x  = 0
+        self._press_y  = 0
+
         self.root.geometry(
-            f"{SPRITE_SIZE}x{SPRITE_SIZE+60}+{sw-SPRITE_SIZE-20}+{sh-SPRITE_SIZE-80}"
+            f"{SPRITE_SIZE}x{SPRITE_SIZE+60}+{int(self.phys_x)}+{int(self.phys_y)}"
         )
 
-        # state
-        self.current_expr = "idle"
-        self.is_dancing   = False
-        self.dance_offset = 0
-        self.dance_dir    = 1
-        self.was_idle     = False
-        self.last_active  = time.time()
-        self.last_window  = ""
+        # ── companion state ────────────────────────────────────────────────────
+        self.current_expr  = "idle"
+        self.is_dancing    = False
+        self.dance_offset  = 0
+        self.dance_dir     = 1
+        self.was_idle      = False
+        self.last_active   = time.time()
+        self.last_window   = ""
         self.bubble_active = False
+        self.game_notified = False
 
-        # sprites
+        # ── sprites ────────────────────────────────────────────────────────────
         self.sprites = {}
         for name in ["idle","happy","surprised","annoyed","talking","sleepy"]:
             path = os.path.join(SPRITE_DIR, f"{name}.png")
@@ -134,10 +186,13 @@ class Companion:
                 img = Image.open(path).convert("RGBA").resize(
                     (SPRITE_SIZE, SPRITE_SIZE), Image.NEAREST)
                 self.sprites[name] = ImageTk.PhotoImage(img)
+        if not self.sprites:
+            raise RuntimeError(f"No sprites found in {SPRITE_DIR}")
         if "sleepy" not in self.sprites:
-            self.sprites["sleepy"] = self.sprites.get("annoyed", self.sprites["idle"])
+            self.sprites["sleepy"] = self.sprites.get("annoyed",
+                                     next(iter(self.sprites.values())))
 
-        # speech bubble
+        # ── speech bubble ──────────────────────────────────────────────────────
         self.bubble_var = tk.StringVar()
         self.bubble = tk.Label(
             root, textvariable=self.bubble_var,
@@ -148,25 +203,29 @@ class Companion:
         )
         self.bubble.place_forget()
 
-        # sprite
+        # ── sprite label ───────────────────────────────────────────────────────
         self.label = tk.Label(root, bg="#010101", bd=0, highlightthickness=0)
         self.label.place(x=0, y=60, width=SPRITE_SIZE, height=SPRITE_SIZE)
         self.set_expr("idle")
 
-        # bindings
-        self._dx = self._dy = 0
-        self.label.bind("<ButtonPress-1>", self.on_click)
-        self.label.bind("<B1-Motion>",     self.on_drag)
-        self.label.bind("<Button-3>",      lambda e: self.root.destroy())
-        self.bubble.bind("<Button-3>",     lambda e: self.root.destroy())
+        # ── bindings ───────────────────────────────────────────────────────────
+        self.label.bind("<ButtonPress-1>",   self.on_press)
+        self.label.bind("<B1-Motion>",       self.on_drag)
+        self.label.bind("<ButtonRelease-1>", self.on_release)
+        self.label.bind("<Button-3>",        lambda e: self.root.destroy())
+        self.bubble.bind("<Button-3>",       lambda e: self.root.destroy())
 
-        # start everything
+        # ── loopback device ────────────────────────────────────────────────────
+        self.loopback_device = get_wasapi_loopback_device()
+
+        # ── start loops ────────────────────────────────────────────────────────
         self.schedule_ambient()
         if AUDIO_AVAILABLE:
             threading.Thread(target=self.audio_loop, daemon=True).start()
         self.dance_tick()
+        self.physics_tick()
 
-    # ── expressions ───────────────────────────────────────────────────────────
+    # ── expressions ────────────────────────────────────────────────────────────
     def set_expr(self, name):
         if name in self.sprites:
             self.label.configure(image=self.sprites[name])
@@ -186,21 +245,69 @@ class Companion:
         if not self.is_dancing:
             self.set_expr(get_time_expr())
 
-    # ── drag ──────────────────────────────────────────────────────────────────
-    def on_click(self, event):
-        self._dx, self._dy = event.x, event.y
+    # ── ragdoll drag ───────────────────────────────────────────────────────────
+    def on_press(self, event):
+        self.is_dragging   = True
+        self.drag_said_msg = False
+        self._press_x = event.x_root
+        self._press_y = event.y_root
+        self.vel_x = 0.0
+        self.vel_y = 0.0
+        self.set_expr("surprised")
         self.last_active = time.time()
         self.was_idle = False
-        self.show_bubble(random.choice(MESSAGES[get_time_key()]), "talking")
 
     def on_drag(self, event):
-        x = self.root.winfo_x() + event.x - self._dx
-        y = self.root.winfo_y() + event.y - self._dy
-        self.root.geometry(f"+{x}+{y}")
+        self.target_x = event.x_root - SPRITE_SIZE // 2
+        self.target_y = event.y_root - SPRITE_SIZE // 2
+        if not self.drag_said_msg and (
+            abs(event.x_root - self._press_x) > 10 or
+            abs(event.y_root - self._press_y) > 10
+        ):
+            self.drag_said_msg = True
+            self.show_bubble(random.choice(DRAG_MSGS), "surprised", duration=2000)
 
-    # ── dance ─────────────────────────────────────────────────────────────────
+    def on_release(self, event):
+        self.is_dragging = False
+        self.vel_x *= 0.4
+        self.vel_y *= 0.4
+        if not self.bubble_active:
+            self.set_expr(get_time_expr())
+
+    # ── physics ────────────────────────────────────────────────────────────────
+    def physics_tick(self):
+        sw = self.root.winfo_screenwidth()
+        sh = self.root.winfo_screenheight()
+
+        if self.is_dragging:
+            # spring toward mouse
+            dx = self.target_x - self.phys_x
+            dy = self.target_y - self.phys_y
+            self.vel_x = self.vel_x * 0.6 + dx * 0.25
+            self.vel_y = self.vel_y * 0.6 + dy * 0.25
+        else:
+            # gravity + damping
+            self.vel_y += 0.8
+            self.vel_x *= 0.88
+            self.vel_y *= 0.88
+            # bounce off screen edges
+            if self.phys_x < 0:
+                self.phys_x = 0;              self.vel_x =  abs(self.vel_x) * 0.5
+            if self.phys_x > sw - SPRITE_SIZE:
+                self.phys_x = sw - SPRITE_SIZE; self.vel_x = -abs(self.vel_x) * 0.5
+            if self.phys_y < 0:
+                self.phys_y = 0;              self.vel_y =  abs(self.vel_y) * 0.5
+            if self.phys_y > sh - SPRITE_SIZE - 60:
+                self.phys_y = sh - SPRITE_SIZE - 60; self.vel_y = -abs(self.vel_y) * 0.3
+
+        self.phys_x += self.vel_x
+        self.phys_y += self.vel_y
+        self.root.geometry(f"+{int(self.phys_x)}+{int(self.phys_y)}")
+        self.root.after(16, self.physics_tick)   # ~60fps
+
+    # ── dance ──────────────────────────────────────────────────────────────────
     def dance_tick(self):
-        if self.is_dancing:
+        if self.is_dancing and not self.is_dragging:
             self.dance_offset += self.dance_dir * 3
             if abs(self.dance_offset) >= 10:
                 self.dance_dir *= -1
@@ -222,13 +329,22 @@ class Companion:
             self.label.place(x=0, y=60, width=SPRITE_SIZE, height=SPRITE_SIZE)
             self.set_expr(get_time_expr())
 
-    # ── audio (background thread) ──────────────────────────────────────────────
+    # ── audio — WASAPI loopback first, mic fallback ────────────────────────────
     def audio_loop(self):
         silent_streak = 0
+        device = self.loopback_device
+        if device is not None:
+            print(f"[pip] system audio via loopback device {device}")
+        else:
+            print("[pip] no loopback found — using mic. enable Stereo Mix in Windows sound settings for system audio.")
+
         while True:
             try:
-                chunk = sd.rec(2048, samplerate=44100, channels=1,
-                               dtype="float32", blocking=True)
+                kwargs = dict(frames=2048, samplerate=44100,
+                              channels=1, dtype="float32", blocking=True)
+                if device is not None:
+                    kwargs["device"] = device
+                chunk = sd.rec(**kwargs)
                 rms = float(np.sqrt(np.mean(chunk**2)))
                 if rms > AUDIO_THRESH:
                     silent_streak = 0
@@ -237,10 +353,11 @@ class Companion:
                     silent_streak += 1
                     if silent_streak > 8:
                         self.root.after(0, self.stop_dance)
-            except Exception:
+            except Exception as e:
+                print(f"[pip] audio error: {e}")
                 time.sleep(5)
 
-    # ── ambient awareness ─────────────────────────────────────────────────────
+    # ── ambient awareness ──────────────────────────────────────────────────────
     def schedule_ambient(self):
         self.root.after(15000, self.ambient_check)
 
@@ -258,16 +375,23 @@ class Companion:
                 self.was_idle = False
                 self.show_bubble(random.choice(RETURN_MSGS), "surprised")
 
-        # window awareness
-        win  = active_window_name()
-        kind = classify_window(win)
-        if win != self.last_window:
+        # window + process awareness
+        win       = active_window_name()
+        kind      = classify_window(win)
+        game_proc = is_game_running()
+
+        if win != self.last_window or (game_proc and not self.game_notified):
             self.last_window = win
-            if kind == "game" and not self.bubble_active:
+            if (kind == "game" or game_proc) and not self.bubble_active:
+                self.game_notified = True
                 self.show_bubble(random.choice(GAME_MSGS), "happy")
             elif kind == "code" and not self.bubble_active:
+                self.game_notified = False
                 if random.random() < 0.3:
                     self.show_bubble(random.choice(CODE_MSGS), "idle")
+            else:
+                if not game_proc:
+                    self.game_notified = False
 
         # battery
         try:
@@ -278,7 +402,7 @@ class Companion:
         except Exception:
             pass
 
-        # random ambient (low freq)
+        # random ambient
         if random.random() < 0.15 and not self.bubble_active and not self.is_dancing:
             self.show_bubble(random.choice(MESSAGES[get_time_key()]), "talking")
 
