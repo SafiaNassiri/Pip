@@ -1,10 +1,3 @@
-"""
-companion.py — Pip, ambient-aware desktop robot
-requires: pip install pillow psutil pywin32 requests
-sprites go in ./sprites/
-hover over Pip for the menu
-"""
-
 import tkinter as tk
 import threading, time, random, datetime, os, json, sys, traceback, subprocess
 import psutil
@@ -302,8 +295,7 @@ def is_self_window(name):
 
 def get_active_game_name():
     if not WIN_AVAILABLE: return None
-    skip_procs  = {"steam.exe","steamwebhelper.exe","python.exe","pythonw.exe",
-                   "explorer.exe","searchhost.exe","shellexperiencehost.exe"}
+    skip_procs  = {"steam.exe","steamwebhelper.exe","python.exe","pythonw.exe", "explorer.exe","searchhost.exe","shellexperiencehost.exe"}
     skip_titles = {"program manager","settings","taskbar","pip","start","python"}
     try:
         results = []
@@ -520,9 +512,7 @@ class Companion:
         self.bar = tk.Frame(root, bg="#0d0d1a", height=self.BAR_H)
         self.bar.place(x=0, y=60+SPRITE_SIZE, width=SPRITE_SIZE, height=self.BAR_H)
 
-        BAR_BTN = {"bg":"#0d0d1a","fg":"#4a4a8a","font":("Courier New",11),
-                   "relief":"flat","bd":0,"cursor":"hand2","padx":2,
-                   "activebackground":"#1a1a2e","activeforeground":"#a0d8ef"}
+        BAR_BTN = {"bg":"#0d0d1a","fg":"#4a4a8a","font":("Courier New",11), "relief":"flat","bd":0,"cursor":"hand2","padx":2, "activebackground":"#1a1a2e","activeforeground":"#a0d8ef"}
 
         def make_btn(icon, left_cmd, right_cmd=None):
             b = tk.Button(self.bar, text=icon, command=left_cmd, **BAR_BTN)
@@ -539,9 +529,9 @@ class Companion:
         make_btn("💬", self._open_talk,          None)
         make_btn("⚙",  self._open_settings,     None)
         tk.Button(self.bar, text="✕", command=self.root.destroy,
-                  bg="#0d0d1a", fg="#5a2a2a", font=("Courier New",11),
-                  relief="flat", bd=0, cursor="hand2", padx=2,
-                  activebackground="#1a1a2e", activeforeground="#ff6b6b").pack(side="left", expand=True)
+                    bg="#0d0d1a", fg="#5a2a2a", font=("Courier New",11),
+                    relief="flat", bd=0, cursor="hand2", padx=2,
+                    activebackground="#1a1a2e", activeforeground="#ff6b6b").pack(side="left", expand=True)
 
         # ── bindings ───────────────────────────────────────────────────────────
         for w in (self.label, self.bubble, self.glow_canvas):
@@ -644,8 +634,7 @@ class Companion:
             (80,  "#2a2e80"),
             (70,  "#3030a0"),
         ]):
-            c.create_oval(cx-r, cy-r, cx+r, cy+r,
-                          outline=color, width=2, tags="glow")
+            c.create_oval(cx-r, cy-r, cx+r, cy+r, outline=color, width=2, tags="glow")
 
     def _hide_glow(self):
         if not self.glow_visible: return
@@ -724,24 +713,24 @@ class Companion:
         win.geometry(f"260x{min(500, 80 + len(earned)*52)}+{px}+{max(0,py-540)}")
 
         tk.Label(win, text="🏆 achievements",
-                 bg="#0d0d1a", fg="#a0d8ef",
-                 font=("Courier New",10,"bold")).pack(pady=(10,6))
+                    bg="#0d0d1a", fg="#a0d8ef",
+                    font=("Courier New",10,"bold")).pack(pady=(10,6))
 
         for key in earned:
             ach = ACHIEVEMENTS.get(key)
             if not ach: continue
             tk.Label(win, text=f"{ach['label']}",
-                     bg="#0d0d1a", fg="#ffffff",
-                     font=("Courier New",9,"bold")).pack(anchor="w", padx=16)
+                        bg="#0d0d1a", fg="#ffffff",
+                        font=("Courier New",9,"bold")).pack(anchor="w", padx=16)
             tk.Label(win, text=ach['desc'],
-                     bg="#0d0d1a", fg="#5a5a8a",
-                     font=("Courier New",8)).pack(anchor="w", padx=24, pady=(0,4))
+                        bg="#0d0d1a", fg="#5a5a8a",
+                        font=("Courier New",8)).pack(anchor="w", padx=24, pady=(0,4))
 
         tk.Button(win, text="close", command=win.destroy,
-                  bg="#1a1a2e", fg="#a0d8ef",
-                  font=("Courier New",9,"bold"),
-                  relief="flat", padx=10, pady=3,
-                  cursor="hand2").pack(pady=8)
+                    bg="#1a1a2e", fg="#a0d8ef",
+                    font=("Courier New",9,"bold"),
+                    relief="flat", padx=10, pady=3,
+                    cursor="hand2").pack(pady=8)
 
     def _show_mood(self):
         mood = self.state.get("mood", 0)
@@ -769,8 +758,8 @@ class Companion:
         win.geometry(f"300x400+{max(0,px-80)}+{max(0,py-440)}")
 
         tk.Label(win, text="📓  pip's diary",
-                 bg="#0d0d1a", fg="#a0d8ef",
-                 font=("Courier New",10,"bold")).pack(pady=(10,4))
+                    bg="#0d0d1a", fg="#a0d8ef",
+                    font=("Courier New",10,"bold")).pack(pady=(10,4))
 
         frame = tk.Frame(win, bg="#0d0d1a")
         frame.pack(fill="both", expand=True, padx=8, pady=4)
@@ -779,9 +768,9 @@ class Companion:
         sb.pack(side="right", fill="y")
 
         lb = tk.Text(frame, bg="#0d0d1a", fg="#a0d8ef",
-                     font=("Courier New",8), relief="flat",
-                     wrap="word", state="disabled",
-                     yscrollcommand=sb.set)
+                        font=("Courier New",8), relief="flat",
+                        wrap="word", state="disabled",
+                        yscrollcommand=sb.set)
         lb.pack(fill="both", expand=True)
         sb.config(command=lb.yview)
 
@@ -796,9 +785,9 @@ class Companion:
         lb.config(state="disabled")
 
         tk.Button(win, text="clear log", command=lambda: self._clear_log(win),
-                  bg="#1a1a2e", fg="#ff6b6b",
-                  font=("Courier New",8), relief="flat",
-                  cursor="hand2", padx=8, pady=3).pack(pady=6)
+                    bg="#1a1a2e", fg="#ff6b6b",
+                    font=("Courier New",8), relief="flat",
+                    cursor="hand2", padx=8, pady=3).pack(pady=6)
 
     def _clear_log(self, win):
         try:
@@ -819,14 +808,14 @@ class Companion:
         win.geometry(f"260x100+{px}+{max(0,py-120)}")
 
         tk.Label(win, text="say something to pip",
-                 bg="#0d0d1a", fg="#5a5a8a",
-                 font=("Courier New",8)).pack(pady=(8,4))
+                    bg="#0d0d1a", fg="#5a5a8a",
+                    font=("Courier New",8)).pack(pady=(8,4))
 
         entry_var = tk.StringVar()
         entry = tk.Entry(win, textvariable=entry_var,
-                         bg="#1a1a2e", fg="#ffffff",
-                         font=("Courier New",10), relief="flat",
-                         bd=6, insertbackground="white", width=24)
+                            bg="#1a1a2e", fg="#ffffff",
+                            font=("Courier New",10), relief="flat",
+                            bd=6, insertbackground="white", width=24)
         entry.pack(padx=16, pady=2)
         entry.focus()
 
@@ -838,10 +827,10 @@ class Companion:
 
         entry.bind("<Return>", send)
         tk.Button(win, text="send", command=send,
-                  bg="#1a1a2e", fg="#a0d8ef",
-                  font=("Courier New",9,"bold"),
-                  relief="flat", padx=10, pady=3,
-                  cursor="hand2").pack(pady=6)
+                    bg="#1a1a2e", fg="#a0d8ef",
+                    font=("Courier New",9,"bold"),
+                    relief="flat", padx=10, pady=3,
+                    cursor="hand2").pack(pady=6)
 
     def _handle_talk(self, text):
         """Pip responds to something you said."""
@@ -898,12 +887,11 @@ class Companion:
         win.geometry(f"280x460+{px}+{max(0,py-480)}")
 
         LBL = {"bg":"#0d0d1a","fg":"#a0d8ef","font":("Courier New",9,"bold")}
-        INP = {"bg":"#1a1a2e","fg":"#ffffff","font":("Courier New",9),
-               "relief":"flat","bd":4,"insertbackground":"white","width":18}
+        INP = {"bg":"#1a1a2e","fg":"#ffffff","font":("Courier New",9), "relief":"flat","bd":4,"insertbackground":"white","width":18}
 
         tk.Label(win, text="⚙  settings",
-                 bg="#0d0d1a", fg="#a0d8ef",
-                 font=("Courier New",11,"bold")).pack(pady=(12,8))
+                    bg="#0d0d1a", fg="#a0d8ef",
+                    font=("Courier New",11,"bold")).pack(pady=(12,8))
 
         def field(label, var):
             tk.Label(win, text=label, **LBL).pack(anchor="w", padx=16)
@@ -927,14 +915,13 @@ class Companion:
         row.pack(anchor="w", padx=16, pady=(0,10))
         for p in ("chill","hype","sleepy"):
             tk.Radiobutton(row, text=p, variable=pers_var, value=p,
-                           bg="#0d0d1a", fg="#a0d8ef", selectcolor="#1a1a2e",
-                           activebackground="#0d0d1a", activeforeground="#fff",
-                           font=("Courier New",9)).pack(side="left", padx=4)
+                            bg="#0d0d1a", fg="#a0d8ef", selectcolor="#1a1a2e",
+                            activebackground="#0d0d1a", activeforeground="#fff",
+                            font=("Courier New",9)).pack(side="left", padx=4)
 
         # status label shown after save
         status_var = tk.StringVar(value="")
-        status_lbl = tk.Label(win, textvariable=status_var,
-                              bg="#0d0d1a", font=("Courier New", 8))
+        status_lbl = tk.Label(win, textvariable=status_var, bg="#0d0d1a", font=("Courier New", 8))
         status_lbl.pack()
 
         def save():
@@ -959,10 +946,10 @@ class Companion:
                 print(f"[pip] settings save error: {e}")
 
         tk.Button(win, text="💾  save settings", command=save,
-                  bg="#1a1a2e", fg="#a0d8ef",
-                  font=("Courier New", 10, "bold"),
-                  relief="flat", padx=16, pady=6,
-                  cursor="hand2").pack(pady=(8,4))
+                    bg="#1a1a2e", fg="#a0d8ef",
+                    font=("Courier New", 10, "bold"),
+                    relief="flat", padx=16, pady=6,
+                    cursor="hand2").pack(pady=(8,4))
 
     # ── interactions ───────────────────────────────────────────────────────────
     def on_press(self, event):
@@ -1138,8 +1125,7 @@ class Companion:
         if self._dancing and not self.is_dragging:
             self._dance_offset += self._dance_dir * 3
             if abs(self._dance_offset) >= 9: self._dance_dir *= -1
-            self.label.place(x=0, y=60+self._dance_offset,
-                             width=SPRITE_SIZE, height=SPRITE_SIZE)
+            self.label.place(x=0, y=60+self._dance_offset, width=SPRITE_SIZE, height=SPRITE_SIZE)
         self.root.after(60, self.dance_tick)
 
     def _start_dance(self, track=None):
@@ -1322,8 +1308,7 @@ class Companion:
         if (random.random() < 0.12 and not self.bubble_active
                 and not self._dancing and not self.game_notified):
             key = ("morning" if 6 <= hour < 12 else
-                   "afternoon" if hour < 17 else
-                   "evening" if hour < 21 else "night")
+                    "ing" if hour < 21 else "night")
             # mood affects random messages
             mood = self.state.get("mood", 0)
             if mood > 5:
