@@ -1,3 +1,10 @@
+"""
+companion.py — Pip, ambient-aware desktop robot
+requires: pip install pillow psutil pywin32 requests
+sprites go in ./sprites/
+hover over Pip for the menu
+"""
+
 import tkinter as tk
 import threading, time, random, datetime, os, json, sys, traceback, subprocess
 import psutil
@@ -461,6 +468,12 @@ class Companion:
         # new achievement queue
         self._achievement_queue = []
 
+        # pomodoro
+        self._pomodoro_active  = False
+        self._pomodoro_working = True
+        self._pomodoro_session = 0
+        self._pomodoro_end     = 0
+
         BAR_H = 28
         self.BAR_H = BAR_H
         self.root.geometry(
@@ -512,7 +525,9 @@ class Companion:
         self.bar = tk.Frame(root, bg="#0d0d1a", height=self.BAR_H)
         self.bar.place(x=0, y=60+SPRITE_SIZE, width=SPRITE_SIZE, height=self.BAR_H)
 
-        BAR_BTN = {"bg":"#0d0d1a","fg":"#4a4a8a","font":("Courier New",11), "relief":"flat","bd":0,"cursor":"hand2","padx":2, "activebackground":"#1a1a2e","activeforeground":"#a0d8ef"}
+        BAR_BTN = {"bg":"#0d0d1a","fg":"#4a4a8a","font":("Courier New",11),
+                    "relief":"flat","bd":0,"cursor":"hand2","padx":2,
+                    "activebackground":"#1a1a2e","activeforeground":"#a0d8ef"}
 
         def make_btn(icon, left_cmd, right_cmd=None):
             b = tk.Button(self.bar, text=icon, command=left_cmd, **BAR_BTN)
@@ -526,6 +541,7 @@ class Companion:
         make_btn("🎵", self._show_now_playing,   self._show_log)
         make_btn("🎮", self._show_current_game,  self._show_screen_time)
         make_btn("🏆", self._show_achievements,  None)
+        make_btn("🍅", self._open_pomodoro,      None)
         make_btn("💬", self._open_talk,          None)
         make_btn("⚙",  self._open_settings,     None)
         tk.Button(self.bar, text="✕", command=self.root.destroy,
@@ -549,16 +565,234 @@ class Companion:
         self.schedule_ambient()
         self.achievement_display_tick()
 
-        # greet on startup
+        # settings live-reload
+        self._settings_mtime = self._get_settings_mtime()
+        self._settings_reload_tick()
+
+        # clipboard watcher
+        self._last_clipboard   = ""
+        self._clipboard_enabled = True
+        self._clipboard_tick()
+
+        # greet on startup — varied messages
         name = self.settings.get("name", "Pip")
+        hour = datetime.datetime.now().hour
+        if 5 <= hour < 12:
+            greet_pool = [
+                f"good morning ☀️ i'm {name}",
+                f"morning! i'm {name} ♡",
+                f"rise and shine~ i'm {name}",
+            ]
+        elif 12 <= hour < 18:
+            greet_pool = [
+                f"hey! i'm {name} ♡",
+                f"hi there! i'm {name}",
+                f"afternoon~ i'm {name} ✨",
+            ]
+        elif 18 <= hour < 22:
+            greet_pool = [
+                f"evening ✨ i'm {name}",
+                f"hey! back again? i'm {name}",
+                f"evening vibes~ i'm {name} ♡",
+            ]
+        else:
+            greet_pool = [
+                f"night owl hours 🌙 i'm {name}",
+                f"up late? i'm {name} ♡",
+                f"just us and the void~ i'm {name}",
+            ]
         self.root.after(800, lambda: self.show_bubble(
-            f"hi! i'm {name} ♡", "happy", duration=2500))
+            random.choice(greet_pool), "happy", duration=2800))
 
     # ── helpers ────────────────────────────────────────────────────────────────
     def msg(self, key):
         p    = self.settings.get("personality", "chill")
         bank = PERSONALITIES.get(p, PERSONALITIES["chill"])
         return random.choice(bank.get(key, ["..."]))
+
+    # ── settings live-reload ───────────────────────────────────────────────────
+    def _get_settings_mtime(self):
+        try:
+            return os.path.getmtime(SETTINGS_F)
+        except Exception:
+            return 0
+
+    def _settings_reload_tick(self):
+        try:
+            mtime = self._get_settings_mtime()
+            if mtime != self._settings_mtime:
+                self._settings_mtime = mtime
+                new_settings = load_settings()
+                changed = [k for k in new_settings if new_settings[k] != self.settings.get(k)]
+                self.settings = new_settings
+                if changed:
+                    print(f"[pip] settings reloaded (changed: {', '.join(changed)})")
+                    if "city" in changed:
+                        self._weather_checked = False   # re-fetch weather
+                    self.show_bubble("settings reloaded ✓", duration=1800)
+        except Exception as e:
+            print(f"[pip] settings reload error: {e}")
+        self.root.after(3000, self._settings_reload_tick)
+
+    # ── clipboard watcher ──────────────────────────────────────────────────────
+    def _clipboard_tick(self):
+        if self._clipboard_enabled:
+            try:
+                text = self.root.clipboard_get()
+                if text and text != self._last_clipboard:
+                    self._last_clipboard = text
+                    self._on_clipboard_change(text)
+            except Exception:
+                pass   # clipboard empty or unavailable
+        self.root.after(2500, self._clipboard_tick)
+
+    def _on_clipboard_change(self, text):
+        if self.bubble_active or self._dancing:
+            return
+        stripped = text.strip()
+        if not stripped:
+            return
+
+        import re as _re
+
+        # URL
+        if _re.match(r"https?://\S{8,}", stripped):
+            domain = _re.sub(r"https?://([^/]+).*", r"\1", stripped)
+            domain = domain if len(domain) < 28 else domain[:25] + "…"
+            msgs = [f"ooh a link~ {domain}", f"saving that link 🔗", f"link copied ✓"]
+            self.show_bubble(random.choice(msgs), "idle", duration=2500)
+            return
+
+        lines = stripped.splitlines()
+
+        # code-ish (multiple lines, has brackets/semicolons/indents)
+        code_score = sum([
+            stripped.count("{") + stripped.count("}") > 1,
+            stripped.count(";") > 2,
+            len([l for l in lines if l.startswith(("    ", "\t"))]) > 1,
+            any(kw in stripped for kw in ("def ","function ","class ","import ","const ","var ","return ")),
+        ])
+        if len(lines) > 2 and code_score >= 2:
+            msgs = ["ooh code snippet 👀", "copying code i see", "snippet saved ✓", "that looks like code 🖥️"]
+            self.show_bubble(random.choice(msgs), "talking", duration=2500)
+            return
+
+        # long text (paragraph+)
+        if len(stripped) > 200:
+            words = len(stripped.split())
+            msgs = [f"that's a lot of text 📋", f"copied {words} words", "big copy ✓"]
+            self.show_bubble(random.choice(msgs), "idle", duration=2200)
+
+    # ── pomodoro mode ──────────────────────────────────────────────────────────
+    POMODORO_WORK_MIN  = 25
+    POMODORO_BREAK_MIN = 5
+
+    def _start_pomodoro(self):
+        self._pomodoro_active  = True
+        self._pomodoro_working = True
+        self._pomodoro_session = 0
+        self._pomodoro_end     = time.time() + self.POMODORO_WORK_MIN * 60
+        self.show_bubble(
+            f"🍅 focus mode!\n{self.POMODORO_WORK_MIN} min work session", "happy", duration=3000)
+        append_log({"text": "pomodoro started"})
+        self._pomodoro_tick()
+
+    def _stop_pomodoro(self):
+        self._pomodoro_active = False
+        self.show_bubble("🍅 pomodoro stopped", "idle", duration=2000)
+        append_log({"text": f"pomodoro ended after {self._pomodoro_session} sessions"})
+
+    def _pomodoro_tick(self):
+        if not getattr(self, "_pomodoro_active", False):
+            return
+        remaining = self._pomodoro_end - time.time()
+        if remaining <= 0:
+            if self._pomodoro_working:
+                # work done → break time
+                self._pomodoro_session += 1
+                self._pomodoro_working  = False
+                self._pomodoro_end      = time.time() + self.POMODORO_BREAK_MIN * 60
+                msgs = [
+                    f"🍅 session {self._pomodoro_session} done!\ntake a {self.POMODORO_BREAK_MIN} min break ☕",
+                    f"work block done ✓\nbreak time! {self.POMODORO_BREAK_MIN} mins",
+                    f"🍅 x{self._pomodoro_session} nice work!\nbreaking now ♡",
+                ]
+                self.show_bubble(random.choice(msgs), "happy", duration=5000)
+                append_log({"text": f"pomodoro session {self._pomodoro_session} complete"})
+            else:
+                # break done → back to work
+                self._pomodoro_working = True
+                self._pomodoro_end     = time.time() + self.POMODORO_WORK_MIN * 60
+                msgs = [
+                    f"break over! back to work 🍅\n{self.POMODORO_WORK_MIN} mins",
+                    "let's go! focus time 🍅",
+                    "break done~ work mode 🍅",
+                ]
+                self.show_bubble(random.choice(msgs), "happy", duration=3500)
+        else:
+            # mid-session nudges at ~halfway
+            half = (self.POMODORO_WORK_MIN * 60) / 2
+            elapsed = (self._pomodoro_end - time.time())
+            # nudge when ~1 min left
+            if self._pomodoro_working and 55 < remaining < 65 and not self.bubble_active:
+                self.show_bubble("🍅 one minute left!", "idle", duration=3000)
+
+        self.root.after(10000, self._pomodoro_tick)   # check every 10s
+
+    def _open_pomodoro(self):
+        if getattr(self, "_pomodoro_active", False):
+            # show status
+            remaining = max(0, self._pomodoro_end - time.time())
+            mins      = int(remaining // 60)
+            secs      = int(remaining % 60)
+            phase     = "work 🍅" if self._pomodoro_working else "break ☕"
+            self.show_bubble(
+                f"pomodoro: {phase}\n{mins}:{secs:02d} left  (session {self._pomodoro_session})",
+                "idle", duration=4000)
+            return
+
+        win = tk.Toplevel(self.root)
+        win.title("pomodoro")
+        win.configure(bg="#0d0d1a")
+        win.resizable(False, False)
+        win.attributes("-topmost", True)
+        px, py = int(self.phys_x), int(self.phys_y)
+        win.geometry(f"240x200+{px}+{max(0,py-220)}")
+
+        tk.Label(win, text="🍅  pomodoro",
+                    bg="#0d0d1a", fg="#a0d8ef",
+                    font=("Courier New", 11, "bold")).pack(pady=(12, 6))
+
+        tk.Label(win,
+                    text=f"{self.POMODORO_WORK_MIN} min work · {self.POMODORO_BREAK_MIN} min break",
+                    bg="#0d0d1a", fg="#5a5a8a",
+                    font=("Courier New", 8)).pack()
+
+        # custom duration row
+        tk.Label(win, text="work minutes:",
+                    bg="#0d0d1a", fg="#a0d8ef",
+                    font=("Courier New", 8, "bold")).pack(anchor="w", padx=20, pady=(10, 0))
+        work_var = tk.StringVar(value=str(self.POMODORO_WORK_MIN))
+        tk.Entry(win, textvariable=work_var,
+                    bg="#1a1a2e", fg="#ffffff",
+                    font=("Courier New", 9), relief="flat", bd=4,
+                    insertbackground="white", width=6).pack(anchor="w", padx=20)
+
+        def start():
+            try:
+                mins = max(1, int(work_var.get()))
+                self.__class__.POMODORO_WORK_MIN = mins
+            except ValueError:
+                pass
+            win.destroy()
+            self._start_pomodoro()
+
+        tk.Button(win, text="▶  start focus",
+                    command=start,
+                    bg="#1a1a2e", fg="#a0d8ef",
+                    font=("Courier New", 10, "bold"),
+                    relief="flat", padx=14, pady=6,
+                    cursor="hand2").pack(pady=(12, 4))
 
     def _base_expr(self):
         mood = self.state.get("mood", 0)
@@ -1308,7 +1542,8 @@ class Companion:
         if (random.random() < 0.12 and not self.bubble_active
                 and not self._dancing and not self.game_notified):
             key = ("morning" if 6 <= hour < 12 else
-                    "ing" if hour < 21 else "night")
+                    "afternoon" if hour < 17 else
+                    "evening" if hour < 21 else "night")
             # mood affects random messages
             mood = self.state.get("mood", 0)
             if mood > 5:
