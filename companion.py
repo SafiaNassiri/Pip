@@ -79,6 +79,8 @@ GAME_PROCESS_HINTS = [
     "gameoverlayui.exe","steamwebhelper.exe","easyanticheat.exe",
     "epicgameslauncher.exe","unrealcefsubprocess.exe","galaxyclient.exe",
 ]
+# processes that should never be detected as games
+SELF_PROCESS_NAMES = {"python.exe","pythonw.exe","pip.exe"}
 GAME_KEYWORDS    = ["game","steam","epic","roblox","minecraft","godot","unity",
                     "itch","rpg","overwatch","valorant","league","fortnite",
                     "genshin","hollow","celeste","stardew","cookie"]
@@ -263,11 +265,16 @@ def is_game_running():
         return any(h in procs for h in GAME_PROCESS_HINTS)
     except Exception: return False
 
+def is_self_window(name):
+    """Return True if the active window is Pip itself."""
+    return any(s in name for s in ("python pip","pythonw pip","pip settings",
+                                    "pip achievements","companion.py"))
+
 def get_active_game_name():
     if not WIN_AVAILABLE: return None
     skip_procs  = {"steam.exe","steamwebhelper.exe","python.exe","pythonw.exe",
                    "explorer.exe","searchhost.exe","shellexperiencehost.exe"}
-    skip_titles = {"program manager","settings","taskbar","pip","start"}
+    skip_titles = {"program manager","settings","taskbar","pip","start","python"}
     try:
         results = []
         def handler(hwnd, _):
@@ -282,10 +289,20 @@ def get_active_game_name():
                     results.append((title, pname))
             except Exception: pass
         win32gui.EnumWindows(handler, None)
+        def clean_title(t):
+            # Cookie Clicker format: "123,456 cookies - Cookie Clicker"
+            # split on dash/pipe and take the last non-numeric part
+            import re as _re
+            parts = _re.split(r"[-|]", t)
+            for part in reversed(parts):
+                part = part.strip()
+                if part and not _re.match(r"^[0-9,. ]+", part):
+                    return part
+            return parts[-1].strip() if parts else t
         for title, pname in results:
             if not any(b in pname for b in ("chrome","firefox","edge","opera")):
-                return title
-        return results[0][0] if results else None
+                return clean_title(title) or title
+        return clean_title(results[0][0]) if results else None
     except Exception: return None
 
 def get_spotify_track():
@@ -1021,7 +1038,7 @@ class Companion:
             game_proc = is_game_running()
             if win != self.last_window or (game_proc and not self.game_notified):
                 self.last_window = win
-                if (kind == "game" or game_proc) and not self.bubble_active:
+                if (kind == "game" or game_proc) and not self.bubble_active and not is_self_window(win):
                     self.game_notified = True
                     name = get_active_game_name()
                     msg  = (f"playing {name[:22]}? 🎮" if name else self.msg("game"))
