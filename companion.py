@@ -525,8 +525,8 @@ class Companion:
         self.bar = tk.Frame(root, bg="#0d0d1a", height=self.BAR_H)
         self.bar.place(x=0, y=60+SPRITE_SIZE, width=SPRITE_SIZE, height=self.BAR_H)
 
-        BAR_BTN = {"bg":"#0d0d1a","fg":"#4a4a8a","font":("Courier New",11),
-                    "relief":"flat","bd":0,"cursor":"hand2","padx":2,
+        BAR_BTN = {"bg":"#0d0d1a","fg":"#4a4a8a","font":("Courier New",9),
+                    "relief":"flat","bd":0,"cursor":"hand2","padx":0,
                     "activebackground":"#1a1a2e","activeforeground":"#a0d8ef"}
 
         def make_btn(icon, left_cmd, right_cmd=None):
@@ -545,8 +545,8 @@ class Companion:
         make_btn("💬", self._open_talk,          None)
         make_btn("⚙",  self._open_settings,     None)
         tk.Button(self.bar, text="✕", command=self.root.destroy,
-                    bg="#0d0d1a", fg="#5a2a2a", font=("Courier New",11),
-                    relief="flat", bd=0, cursor="hand2", padx=2,
+                    bg="#0d0d1a", fg="#5a2a2a", font=("Courier New",9),
+                    relief="flat", bd=0, cursor="hand2", padx=0,
                     activebackground="#1a1a2e", activeforeground="#ff6b6b").pack(side="left", expand=True)
 
         # ── bindings ───────────────────────────────────────────────────────────
